@@ -1,0 +1,10 @@
+name = "ga"
+version = "0.1.0"
+defaultTargets = ["ga"]
+
+[[lean_lib]]
+name = "Ga"
+
+[[lean_exe]]
+name = "ga"
+root = "Main"
