@@ -69,33 +69,29 @@ def first_two_good (bs: List (B p q r)): Bool :=
     | [_] => false
     | (a :: b :: _) => compare a b == .lt
 
-partial def simplify_be_2  (is_outer: Bool) (obe: OSBE p q r): (OSBE p q r) := do
+partial def simplify_be_2 (obe: OSBE p q r): (OSBE p q r) := do
   let (sign, ⟨be⟩) <- obe
   match be with
     | [] => obe
     | [_] => obe
     | (a :: b :: rest) => match compare a b with
       | .lt => do
-        let (sign', ⟨be'⟩) <- simplify_be_2 is_outer $ Option.some (sign, ⟨b :: rest⟩)
+        let (sign', ⟨be'⟩) <- simplify_be_2 $ Option.some (sign, ⟨b :: rest⟩)
         let a_be' :=  a :: be'
         let obe2 := (sign', ⟨a_be'⟩)
         if first_two_good a_be'
           then return obe2
-          else simplify_be_2 is_outer $ return obe2
+          else simplify_be_2 $ return obe2
       | .gt => do
-        let (sign', ⟨be'⟩) <- simplify_be_2 is_outer $ Option.some (.neg * sign, ⟨a :: rest⟩)
-        simplify_be_2 is_outer $ Option.some (sign', ⟨b :: be'⟩)
+        let (sign', ⟨be'⟩) <- simplify_be_2 $ Option.some (.neg * sign, ⟨a :: rest⟩)
+        simplify_be_2 $ Option.some (sign', ⟨b :: be'⟩)
       | .eq => match a, b with
         | .ez _, .ez _ => Option.none
-        | .ep _, .ep _ => if is_outer then Option.none else return (sign * .pos, ⟨rest⟩)
-        | .en _, .en _ => if is_outer then Option.none else return (sign * .neg, ⟨rest⟩)
+        | .ep _, .ep _ => return (sign * .pos, ⟨rest⟩)
+        | .en _, .en _ => return (sign * .neg, ⟨rest⟩)
         | o1, o2 => sorry
 
-
-abbrev MultiBasis(p)(q)(r) := Vector (BE p q r) (2^(p+q+r))
-abbrev MultiBasisNames(p)(q)(r) := Vector String (2^(p+q+r))
-
-def weird_basis: MultiBasis 3 0 1 :=
+def basis: Vector (BE 3 0 1) ((3+0+1)^2) :=
   #v[
     m_one,
 
@@ -119,37 +115,13 @@ def weird_basis: MultiBasis 3 0 1 :=
     e0 * e1 * e2 * e3
   ]
 
-def basis: MultiBasis 3 0 1 :=
-  #v[
-    m_one,
-
-    e0,
-    e1,
-    e2,
-    e3,
-
-    e0 * e1,
-    e0 * e2,
-    e0 * e3,
-    e1 * e2,
-    e2 * e3,
-    e1 * e3,
-
-    e0 * e1 * e2,
-    e0 * e2 * e3,
-    e0 * e1 * e3,
-    e1 * e2 * e3,
-
-    e0 * e1 * e2 * e3
-  ]
-
-def from_coefs (basis: MultiBasis p q r) (names: MultiBasisNames p q r) :=
+def from_coefs (basis: Vector (BE p q r) ((p + q + r)^2)) (names: Vector String ((p + q + r)^2)) :=
   List.foldr Expr.add (Expr.coef (.var "asdf") .none) $
     List.zipWith (fun name base => Expr.coef (.var name) base)
     (names.toList)
     (basis.toList.map fun x => Option.some (.pos, x))
 
-def this_names: MultiBasisNames 3 0 1 :=
+def this_names :=
 #v[
   "data[0]",
   "data[1]",
@@ -169,7 +141,7 @@ def this_names: MultiBasisNames 3 0 1 :=
   "data[15]",
 ]
 
-def other_names: MultiBasisNames 3 0 1 :=
+def other_names :=
 #v[
   "other.data[0]",
   "other.data[1]",
@@ -189,7 +161,7 @@ def other_names: MultiBasisNames 3 0 1 :=
   "other.data[15]",
 ]
 
-def res_names: MultiBasisNames 3 0 1 :=
+def res_names :=
 #v[
   "res.data[0]",
   "res.data[1]",
@@ -242,28 +214,26 @@ instance: Ord (R × BE p q r) where
     let (_, y) := b
     compare x y
 
-partial def simplify2 (is_outer: Bool) (e: Expr p q r): MultiAdd p q r :=
-  let simp2 := simplify2 is_outer
-  match e with
-    -- Associate everything to the left
-    | x + (y + z) => simp2 (x + y) ++ simp2 z
-    | x * (y * z) => simp2 (x * y) ++ simp2 z
+partial def simplify2 (e: Expr p q r): MultiAdd p q r := match e with
+  -- Associate everything to the left
+  | x + (y + z) => simplify2 (x + y) ++ simplify2 z
+  | x * (y * z) => simplify2 (x * y) ++ simplify2 z
 
-    -- Distribute
-    | (x + y) * z => simp2 (x * z) ++ simp2 (y * z)
-    | x * (y + z) => simp2 (x * y) ++ simp2 (x * z)
+  -- Distribute
+  | (x + y) * z => simplify2 (x * z) ++ simplify2 (y * z)
+  | x * (y + z) => simplify2 (x * y) ++ simplify2 (x * z)
 
-    -- Move scalars to the left of basis words
-    | (.mul a b) * (.coef r2 b2) => simp2 $ (.coef r2 b2) * (.mul a b)
-    -- Combine basis words
-    | (.coef r1 b1) * (.coef r2 b2) => simp2 $ (.coef (r1*r2) (simplify_be_2 is_outer (b1*b2)))
+  -- Move scalars to the left of basis words
+  | (.mul a b) * (.coef r2 b2) => simplify2 $ (.coef r2 b2) * (.mul a b)
+  -- Combine basis words
+  | (.coef r1 b1) * (.coef r2 b2) => simplify2 $ (.coef (r1*r2) (simplify_be_2 (b1*b2)))
 
-    -- Straightforward, put things in the add list
-    | (x + y) => simp2 x ++ simp2 y
-    | (.coef r b) => match simplify_be_2 is_outer b with
-      | .none => []
-      | .some (.neg, b') => [(-r, b')]
-      | .some (.pos, b') => [(r, b')]
+  -- Straightforward, put things in the add list
+  | (x + y) => simplify2 x ++ simplify2 y
+  | (.coef r b) => match simplify_be_2 b with
+    | .none => []
+    | .some (.neg, b') => [(-r, b')]
+    | .some (.pos, b') => [(r, b')]
 
 partial def combine_terms_helper (ma: MultiAdd p q r): MultiAdd p q r :=
   match ma with
@@ -317,29 +287,24 @@ def pp_add (ma: MultiAdd 3 0 1): String :=
   let nicelist := List.map (fun (r, ⟨bws⟩) => s!"storage[{pp_bws bws}] = {pp_r r}") ma
   List.foldr (fun a b => a ++ "\n" ++ b) "" nicelist
 
-def extract_to_basis (ma: MultiAdd p q r) (mbasis: MultiBasis p q r) (resnames: MultiBasisNames p q r) :=
+def extract_to_basis (ma: MultiAdd p q r) (mbasis: Vector (BE p q r) ((p + q + r)^2)) (resnames: Vector (String) ((p + q + r)^2)) :=
   Vector.map
     (fun basis_and_name =>
       let elt := List.find? (fun elt => Prod.snd elt == Prod.fst basis_and_name) ma
       match elt with
-      | .none => "ERROR! couldn't find bw"
+      | .none => panic! "ERROR!" -- This doesn't seem to trigger, despite this branch being followed. maybe its a bug?
       | .some elt => s!"{Prod.snd basis_and_name} = {pp_r elt.fst};"
       -- {pp_r $ repr $ elt.map Prod.fst}
     )
     (Vector.zip mbasis resnames)
 
-def extract_flops (is_outer: Bool) (mbasis: MultiBasis p q r) (m1 m2 res: MultiBasisNames p q r): String :=
-  let unsimped := (from_coefs mbasis m1 * from_coefs mbasis m2)
-  let simped := simplify2 is_outer unsimped
-  let combined := combine_terms simped
-  assert! List.length combined <= 2^(p + q + r)
-  let extracted_basis := extract_to_basis combined mbasis res
-  let pretty_extracted := extracted_basis.foldr (fun x y => s!"{x}\n{y}") ""
-  pretty_extracted
-
 def main : IO Unit := do
-  IO.println "R301 geo product:"
-  IO.println $ extract_flops false basis this_names other_names res_names
-
-  IO.println "R301 out product:"
-  IO.println $ extract_flops true basis this_names other_names res_names
+  let unsimped := (this * other)
+  let simped := simplify2 unsimped
+  let combined := combine_terms simped
+  assert! List.length combined <= 2^(3 + 0 + 1)
+  let pretty := pp_add combined
+  -- IO.println $ pretty
+  let extracted_basis := extract_to_basis combined basis res_names
+  let pretty_extracted := extracted_basis.foldr (fun x y => s!"{x}\n{y}") ""
+  IO.println $ pretty_extracted

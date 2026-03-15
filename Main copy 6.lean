@@ -5,7 +5,7 @@ inductive R where
   | add: R -> R -> R
   | mul: R -> R -> R
   | neg : R -> R
-  deriving Repr, Inhabited
+  deriving Repr
 instance : Add R where
   add := R.add
 instance : Mul R where
@@ -17,11 +17,11 @@ inductive B (p:Nat) (q:Nat) (r:Nat) where
   | ez : Fin r -> B p q r
   | en : Fin q -> B p q r
   | ep : Fin p -> B p q r
-  deriving Repr, Ord, BEq
+  deriving Repr, Ord
 
 structure BE p q r where
   prod : List (B p q r)
-  deriving Repr, Ord, BEq, Inhabited
+  deriving Repr, Ord
 instance : Mul (BE p q r) where
   mul x y := ⟨x.prod ++ y.prod⟩
 
@@ -55,13 +55,13 @@ instance : Add (Expr p q r) where
 instance : Mul (Expr p q r) where
   mul := Expr.mul
 
-def m_one : BE 3 0 1 := ⟨[]⟩
+def m_one : OSBE 3 0 1 := Option.some (.pos, ⟨[]⟩)
 
-def e0 : BE 3 0 1 := ⟨[B.ez 0]⟩
+def e0 : OSBE 3 0 1 := Option.some (.pos, ⟨[B.ez 0]⟩)
 
-def e1 : BE 3 0 1 := ⟨[B.ep 0]⟩
-def e2 : BE 3 0 1 := ⟨[B.ep 1]⟩
-def e3 : BE 3 0 1 := ⟨[B.ep 2]⟩
+def e1 : OSBE 3 0 1 := Option.some (.pos, ⟨[B.ep 0]⟩)
+def e2 : OSBE 3 0 1 := Option.some (.pos, ⟨[B.ep 1]⟩)
+def e3 : OSBE 3 0 1 := Option.some (.pos, ⟨[B.ep 2]⟩)
 
 def first_two_good (bs: List (B p q r)): Bool :=
   match bs with
@@ -69,34 +69,30 @@ def first_two_good (bs: List (B p q r)): Bool :=
     | [_] => false
     | (a :: b :: _) => compare a b == .lt
 
-partial def simplify_be_2  (is_outer: Bool) (obe: OSBE p q r): (OSBE p q r) := do
+partial def simplify_be_2 (obe: OSBE p q r): (OSBE p q r) := do
   let (sign, ⟨be⟩) <- obe
   match be with
     | [] => obe
     | [_] => obe
     | (a :: b :: rest) => match compare a b with
       | .lt => do
-        let (sign', ⟨be'⟩) <- simplify_be_2 is_outer $ Option.some (sign, ⟨b :: rest⟩)
+        let (sign', ⟨be'⟩) <- simplify_be_2 $ Option.some (sign, ⟨b :: rest⟩)
         let a_be' :=  a :: be'
         let obe2 := (sign', ⟨a_be'⟩)
         if first_two_good a_be'
           then return obe2
-          else simplify_be_2 is_outer $ return obe2
+          else simplify_be_2 $ return obe2
       | .gt => do
-        let (sign', ⟨be'⟩) <- simplify_be_2 is_outer $ Option.some (.neg * sign, ⟨a :: rest⟩)
-        simplify_be_2 is_outer $ Option.some (sign', ⟨b :: be'⟩)
+        let (sign', ⟨be'⟩) <- simplify_be_2 $ Option.some (.neg * sign, ⟨a :: rest⟩)
+        simplify_be_2 $ Option.some (sign', ⟨b :: be'⟩)
       | .eq => match a, b with
         | .ez _, .ez _ => Option.none
-        | .ep _, .ep _ => if is_outer then Option.none else return (sign * .pos, ⟨rest⟩)
-        | .en _, .en _ => if is_outer then Option.none else return (sign * .neg, ⟨rest⟩)
+        | .ep _, .ep _ => return (sign * .pos, ⟨rest⟩)
+        | .en _, .en _ => return (sign * .neg, ⟨rest⟩)
         | o1, o2 => sorry
 
-
-abbrev MultiBasis(p)(q)(r) := Vector (BE p q r) (2^(p+q+r))
-abbrev MultiBasisNames(p)(q)(r) := Vector String (2^(p+q+r))
-
-def weird_basis: MultiBasis 3 0 1 :=
-  #v[
+def basis: List (OSBE 3 0 1) :=
+  [
     m_one,
 
     e0,
@@ -119,38 +115,14 @@ def weird_basis: MultiBasis 3 0 1 :=
     e0 * e1 * e2 * e3
   ]
 
-def basis: MultiBasis 3 0 1 :=
-  #v[
-    m_one,
-
-    e0,
-    e1,
-    e2,
-    e3,
-
-    e0 * e1,
-    e0 * e2,
-    e0 * e3,
-    e1 * e2,
-    e2 * e3,
-    e1 * e3,
-
-    e0 * e1 * e2,
-    e0 * e2 * e3,
-    e0 * e1 * e3,
-    e1 * e2 * e3,
-
-    e0 * e1 * e2 * e3
-  ]
-
-def from_coefs (basis: MultiBasis p q r) (names: MultiBasisNames p q r) :=
+def from_coefs (names: List String) :=
   List.foldr Expr.add (Expr.coef (.var "asdf") .none) $
-    List.zipWith (fun name base => Expr.coef (.var name) base)
-    (names.toList)
-    (basis.toList.map fun x => Option.some (.pos, x))
+    List.zipWith (fun name base => .coef (.var name) base)
+    names
+    basis
 
-def this_names: MultiBasisNames 3 0 1 :=
-#v[
+def this_names :=
+[
   "data[0]",
   "data[1]",
   "data[2]",
@@ -169,8 +141,8 @@ def this_names: MultiBasisNames 3 0 1 :=
   "data[15]",
 ]
 
-def other_names: MultiBasisNames 3 0 1 :=
-#v[
+def other_names :=
+[
   "other.data[0]",
   "other.data[1]",
   "other.data[2]",
@@ -189,8 +161,8 @@ def other_names: MultiBasisNames 3 0 1 :=
   "other.data[15]",
 ]
 
-def res_names: MultiBasisNames 3 0 1 :=
-#v[
+def res_names :=
+[
   "res.data[0]",
   "res.data[1]",
   "res.data[2]",
@@ -209,8 +181,8 @@ def res_names: MultiBasisNames 3 0 1 :=
   "res.data[15]",
 ]
 
-def this: Expr 3 0 1 := from_coefs basis this_names
-def other: Expr 3 0 1 := from_coefs basis other_names
+def this := from_coefs this_names
+def other := from_coefs other_names
 
 def count_muls (e: Expr p q r): Nat := match e with
   | x * y => count_muls x + count_muls y + 1
@@ -242,28 +214,26 @@ instance: Ord (R × BE p q r) where
     let (_, y) := b
     compare x y
 
-partial def simplify2 (is_outer: Bool) (e: Expr p q r): MultiAdd p q r :=
-  let simp2 := simplify2 is_outer
-  match e with
-    -- Associate everything to the left
-    | x + (y + z) => simp2 (x + y) ++ simp2 z
-    | x * (y * z) => simp2 (x * y) ++ simp2 z
+partial def simplify2 (e: Expr p q r): MultiAdd p q r := match e with
+  -- Associate everything to the left
+  | x + (y + z) => simplify2 (x + y) ++ simplify2 z
+  | x * (y * z) => simplify2 (x * y) ++ simplify2 z
 
-    -- Distribute
-    | (x + y) * z => simp2 (x * z) ++ simp2 (y * z)
-    | x * (y + z) => simp2 (x * y) ++ simp2 (x * z)
+  -- Distribute
+  | (x + y) * z => simplify2 (x * z) ++ simplify2 (y * z)
+  | x * (y + z) => simplify2 (x * y) ++ simplify2 (x * z)
 
-    -- Move scalars to the left of basis words
-    | (.mul a b) * (.coef r2 b2) => simp2 $ (.coef r2 b2) * (.mul a b)
-    -- Combine basis words
-    | (.coef r1 b1) * (.coef r2 b2) => simp2 $ (.coef (r1*r2) (simplify_be_2 is_outer (b1*b2)))
+  -- Move scalars to the left of basis words
+  | (.mul a b) * (.coef r2 b2) => simplify2 $ (.coef r2 b2) * (.mul a b)
+  -- Combine basis words
+  | (.coef r1 b1) * (.coef r2 b2) => simplify2 $ (.coef (r1*r2) (simplify_be_2 (b1*b2)))
 
-    -- Straightforward, put things in the add list
-    | (x + y) => simp2 x ++ simp2 y
-    | (.coef r b) => match simplify_be_2 is_outer b with
-      | .none => []
-      | .some (.neg, b') => [(-r, b')]
-      | .some (.pos, b') => [(r, b')]
+  -- Straightforward, put things in the add list
+  | (x + y) => simplify2 x ++ simplify2 y
+  | (.coef r b) => match simplify_be_2 b with
+    | .none => []
+    | .some (.neg, b') => [(-r, b')]
+    | .some (.pos, b') => [(r, b')]
 
 partial def combine_terms_helper (ma: MultiAdd p q r): MultiAdd p q r :=
   match ma with
@@ -317,29 +287,13 @@ def pp_add (ma: MultiAdd 3 0 1): String :=
   let nicelist := List.map (fun (r, ⟨bws⟩) => s!"storage[{pp_bws bws}] = {pp_r r}") ma
   List.foldr (fun a b => a ++ "\n" ++ b) "" nicelist
 
-def extract_to_basis (ma: MultiAdd p q r) (mbasis: MultiBasis p q r) (resnames: MultiBasisNames p q r) :=
-  Vector.map
-    (fun basis_and_name =>
-      let elt := List.find? (fun elt => Prod.snd elt == Prod.fst basis_and_name) ma
-      match elt with
-      | .none => "ERROR! couldn't find bw"
-      | .some elt => s!"{Prod.snd basis_and_name} = {pp_r elt.fst};"
-      -- {pp_r $ repr $ elt.map Prod.fst}
-    )
-    (Vector.zip mbasis resnames)
-
-def extract_flops (is_outer: Bool) (mbasis: MultiBasis p q r) (m1 m2 res: MultiBasisNames p q r): String :=
-  let unsimped := (from_coefs mbasis m1 * from_coefs mbasis m2)
-  let simped := simplify2 is_outer unsimped
-  let combined := combine_terms simped
-  assert! List.length combined <= 2^(p + q + r)
-  let extracted_basis := extract_to_basis combined mbasis res
-  let pretty_extracted := extracted_basis.foldr (fun x y => s!"{x}\n{y}") ""
-  pretty_extracted
+--def extract_to_basis Basis Resnames -> List String
 
 def main : IO Unit := do
-  IO.println "R301 geo product:"
-  IO.println $ extract_flops false basis this_names other_names res_names
-
-  IO.println "R301 out product:"
-  IO.println $ extract_flops true basis this_names other_names res_names
+  let unsimped := (this * other)
+  let simped := simplify2 unsimped
+  let combined := combine_terms simped
+  assert! List.length combined <= 2^(3 + 0 + 1)
+  let pretty := pp_add combined
+  IO.println $ pretty
+  --let x := extract_to_basis basis res_names
