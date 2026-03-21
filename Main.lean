@@ -91,7 +91,6 @@ partial def simplify_be_2  (is_outer: Bool) (obe: OSBE p q r): (OSBE p q r) := d
         | .en _, .en _ => if is_outer then Option.none else return (sign * .neg, ⟨rest⟩)
         | o1, o2 => sorry
 
-
 abbrev MultiBasis(p)(q)(r) := Vector (BE p q r) (2^(p+q+r))
 abbrev MultiBasisNames(p)(q)(r) := Vector String (2^(p+q+r))
 
@@ -149,68 +148,6 @@ def from_coefs (basis: MultiBasis p q r) (names: MultiBasisNames p q r) :=
     (names.toList)
     (basis.toList.map fun x => Option.some (.pos, x))
 
-def this_names: MultiBasisNames 3 0 1 :=
-#v[
-  "data[0]",
-  "data[1]",
-  "data[2]",
-  "data[3]",
-  "data[4]",
-  "data[5]",
-  "data[6]",
-  "data[7]",
-  "data[8]",
-  "data[9]",
-  "data[10]",
-  "data[11]",
-  "data[12]",
-  "data[13]",
-  "data[14]",
-  "data[15]",
-]
-
-def other_names: MultiBasisNames 3 0 1 :=
-#v[
-  "other.data[0]",
-  "other.data[1]",
-  "other.data[2]",
-  "other.data[3]",
-  "other.data[4]",
-  "other.data[5]",
-  "other.data[6]",
-  "other.data[7]",
-  "other.data[8]",
-  "other.data[9]",
-  "other.data[10]",
-  "other.data[11]",
-  "other.data[12]",
-  "other.data[13]",
-  "other.data[14]",
-  "other.data[15]",
-]
-
-def res_names: MultiBasisNames 3 0 1 :=
-#v[
-  "res.data[0]",
-  "res.data[1]",
-  "res.data[2]",
-  "res.data[3]",
-  "res.data[4]",
-  "res.data[5]",
-  "res.data[6]",
-  "res.data[7]",
-  "res.data[8]",
-  "res.data[9]",
-  "res.data[10]",
-  "res.data[11]",
-  "res.data[12]",
-  "res.data[13]",
-  "res.data[14]",
-  "res.data[15]",
-]
-
-def this: Expr 3 0 1 := from_coefs basis this_names
-def other: Expr 3 0 1 := from_coefs basis other_names
 
 def count_muls (e: Expr p q r): Nat := match e with
   | x * y => count_muls x + count_muls y + 1
@@ -337,9 +274,151 @@ def extract_flops (is_outer: Bool) (mbasis: MultiBasis p q r) (m1 m2 res: MultiB
   let pretty_extracted := extracted_basis.foldr (fun x y => s!"{x}\n{y}") ""
   pretty_extracted
 
-def main : IO Unit := do
+
+def access_float16_data (field: String) (index: String): String := s!"{field}{index}"
+
+def float16_indices := #v[
+  "[0]",
+  "[1]",
+  "[2]",
+  "[3]",
+  "[4]",
+  "[5]",
+  "[6]",
+  "[7]",
+  "[8]",
+  "[9]",
+  "[10]",
+  "[11]",
+  "[12]",
+  "[13]",
+  "[14]",
+  "[15]",
+]
+
+def mat44_indices := #v[
+  "[0][0]",
+  "[0][1]",
+  "[0][2]",
+  "[0][3]",
+  "[1][0]",
+  "[1][1]",
+  "[1][2]",
+  "[1][3]",
+  "[2][0]",
+  "[2][1]",
+  "[2][2]",
+  "[2][3]",
+  "[3][0]",
+  "[3][1]",
+  "[3][2]",
+  "[3][3]",
+]
+
+def float16_flops: IO Unit := do
+  let this_names := float16_indices.map (fun i => s!"data{i}")
+  let other_names := float16_indices.map (fun i => s!"other.data{i}")
+  let res_names := float16_indices.map (fun i => s!"res.data{i}")
+
   IO.println "R301 geo product:"
   IO.println $ extract_flops false basis this_names other_names res_names
 
   IO.println "R301 out product:"
   IO.println $ extract_flops true basis this_names other_names res_names
+
+def mat44_flops: IO Unit := do
+  let this_names := mat44_indices.map (fun i => s!"a{i}")
+  let other_names := mat44_indices.map (fun i => s!"b{i}")
+  let res_names := mat44_indices.map (fun i => s!"res{i}")
+
+  IO.println "R301 geo product:"
+  IO.println $ extract_flops false basis this_names other_names res_names
+
+  IO.println "R301 out product:"
+  IO.println $ extract_flops true basis this_names other_names res_names
+
+def inverse_equations: IO Unit := do
+  let this_names := (Vector.range 16).map (fun i => s!"x_{i}")
+  let other_names := (Vector.range 16).map (fun i => s!"y_{i}")
+  let res_names := (Vector.range 16).map (fun i => if i == 0 then "1" else "0")
+
+  IO.println "R301 geo product fixed x_i, inverses y_i"
+  IO.println $ extract_flops false basis this_names other_names res_names
+
+structure Matrix (Elt: Type) (rows: Nat) (cols: Nat) where
+  index: (Fin rows) × (Fin cols) -> Elt
+
+def extract2 (ma: MultiAdd p q r) (mbasis: MultiBasis p q r) :=
+  Vector.map
+    (fun basis =>
+      let elt := List.find? (fun elt => Prod.snd elt == basis) ma
+      match elt with
+      | .none => panic! "ERROR!"
+      | .some elt => elt.fst
+      -- {pp_r $ repr $ elt.map Prod.fst}
+    )
+    mbasis
+
+
+inductive FlatR where
+  | var: String -> FlatR
+  | mul: FlatR -> FlatR -> FlatR
+  deriving Repr, Inhabited
+abbrev SFlatR := Sign × FlatR
+
+def flatten_r (r: R): List SFlatR :=
+  match r with
+  | .var name => [(.pos, .var name)]
+  | (r1 + r2) => flatten_r r1 ++ flatten_r r2
+  | (-r1) => (flatten_r r1).map (fun (s,rf) => (s * .neg, rf))
+  | (r1 * r2) => (flatten_r r1).flatMap (fun (s1, rf1) => (flatten_r r2).map (fun (s2, rf2) => (s1*s2, .mul rf1 rf2)))
+
+def build_matrix (is_outer: Bool) (mbasis: MultiBasis p q r) (this inverted: MultiBasisNames p q r): Matrix SFlatR (2^(p+q+r)) (2^(p+q+r)) :=
+  let unsimped := (from_coefs mbasis this * from_coefs mbasis inverted)
+  let simped := simplify2 is_outer unsimped
+  let combined := combine_terms simped
+  -- assert! List.length combined <= 2^(p + q + r)
+  let extracted_basis := extract2 combined mbasis
+  let yay := extracted_basis.map flatten_r
+  -- let yay2 := yay.map (fun x => x.mergeSort (fun (s1,r1) (s2,r2) => sorry))
+
+  ⟨fun (r, c) => (yay.get r).getD c (.pos, .var "zilch") ⟩
+
+def inverse_equations2 :=
+  let this_names := (Vector.range 16).map (fun i => s!"x_{i}")
+  let inv_names := (Vector.range 16).map (fun i => s!"y_{i}")
+  --let res_names := (Vector.range 16).map (fun i => if i == 0 then "1" else "0")
+
+  --IO.println "R301 geo product fixed x_i, inverses y_i"
+  --IO.println $ extract_flops false basis this_names other_names res_names
+  build_matrix false basis this_names inv_names
+
+def pretty_flatr: FlatR -> String := fun rf => match rf with
+  | .var name => name
+  | .mul r1 r2 => s!"{pretty_flatr r1} * {pretty_flatr r2}"
+
+def pretty_sflatr: SFlatR -> String :=
+  fun (s, rf) =>
+    let sp := match s with
+      | .pos => ""
+      | .neg => "-"
+    s!"{sp}{pretty_flatr rf}"
+
+def main : IO Unit := do
+  -- float16_flops
+  -- mat44_flops
+  -- inverse_equations
+  -- IO.println $ repr $ inverse_equations2
+
+  let mat := inverse_equations2
+  let print_row(r) :=
+    Vector.foldr
+      (fun x y => x ++ "" ++ y)
+      ""
+      (
+        (Vector.range 16).map $ fun c =>
+          let elt := mat.index (⟨r, sorry⟩,⟨c, sorry⟩)
+          pad (pretty_sflatr elt) 20
+      )
+
+  IO.println $ Vector.foldr (fun x y => x ++ "\n" ++ y) "" ((Vector.range 16).map print_row)
